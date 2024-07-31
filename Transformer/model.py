@@ -9,7 +9,7 @@ class ModelArgs:
     dim: int = 128
     dim_ff: int = dim * 4
     num_layers: int = 4
-    num_heads: int = 2
+    num_heads: int = 4
     dim_head: int = dim // num_heads
 
     problem_vocab_size: int = 0  # Set when the dataset is loaded

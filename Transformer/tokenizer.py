@@ -2,6 +2,7 @@
 
 import io
 import os
+import re
 import pickle
 import tokenize
 
@@ -26,13 +27,25 @@ class Tokenizers:
         self.problem_tokenizer = Tokenizer(filters='', oov_token='UNK')
         self.solution_tokenizer = Tokenizer(filters='', oov_token='UNK', lower=False)
 
+        # Special tokens
         self.sos_token = '<SOS>'
         self.eos_token = '<EOS>'
+        self.indent_token = '<INDENT>'
+        self.dedent_token = '<DEDENT>'
+        self.hardcoded_tokens = [
+            '.', ',', '(', ')', ';', '!', '"', '-'
+        ]
 
     def save_metadata(self, tokenizer, metadata_path):
         with open(metadata_path, 'w') as f:
             for word, index in tokenizer.word_index.items():
                 f.write(f'{word}\n')
+    
+    def add_hardcoded_tokens(self, text):
+        # Ensure hardcoded tokens are split correctly
+        for token in self.hardcoded_tokens:
+            text = re.sub(r'(\s*{}\s*)'.format(re.escape(token)), r' \1 ', text)
+        return text
     
     def tokenize_input(self, problems):
         # Fit Keras tokenizer
@@ -56,15 +69,35 @@ class Tokenizers:
         # Tokenize with Python tokenizer
         decoder_inputs = []
         targets = []
-        for solution in solutions:
+        compiled_indices = []
+        for index, solution in enumerate(solutions):
             tokens = []
-            for token in tokenize.generate_tokens(io.StringIO(solution).readline):
-                tokens.append(token.string)
+            try:
+                for token in tokenize.generate_tokens(io.StringIO(solution).readline):
+                    if token.type == tokenize.STRING:
+                        if token.string.startswith('"""') or token.string.startswith("'''"):
+                            continue
+                    if token.type == tokenize.INDENT:
+                        tokens.append(self.indent_token)
+                    elif token.type == tokenize.DEDENT:
+                        tokens.append(self.dedent_token)
+                    else:
+                        tokens.append(token.string)
+                        
+                while tokens and tokens[-1] in ('', self.indent_token, self.dedent_token):
+                    tokens.pop()
+            except (tokenize.TokenError, IndentationError) as e:
+                continue
+
+            compiled_indices.append(index)
             decoder_inputs.append([self.sos_token] + tokens)
             targets.append(tokens + [self.eos_token])
         
+        print(f"ERRORS COUNT: {len(solutions) - len(compiled_indices)}")
+        
         # Fit Keras tokenizer and tokenize
-        self.solution_tokenizer.fit_on_texts([[self.sos_token, self.eos_token]] + decoder_inputs + targets)
+        special_tokens = [self.sos_token, self.eos_token, self.indent_token]
+        self.solution_tokenizer.fit_on_texts([special_tokens] + decoder_inputs + [targets[-1]])
 
         # Save tokenizer
         with open(self.solution_tokenizer_path, 'wb') as f:
@@ -80,4 +113,4 @@ class Tokenizers:
         decoder_inputs = pad_sequences(decoder_inputs, padding='post', maxlen=max_length_output)
         targets = pad_sequences(targets, padding='post', maxlen=max_length_output)
 
-        return decoder_inputs, targets
+        return decoder_inputs, targets, compiled_indices

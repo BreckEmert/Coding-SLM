@@ -8,7 +8,9 @@ import tensorflow as tf
 from Transformer import (
     Dataset_Generator, ModelArgs, 
     Transformer, EncoderBlock, DecoderBlock, EncoderLayer, DecoderLayer, NoamSchedule, 
-    Codeforces_A, LeetCode_Complete, LeetCode_Master, LeetCode_Train, Problem_Solution, All
+    Advent_of_Code, Codeforces_A, Evol_Instruct, 
+    LeetCode_Complete, LeetCode_Master, LeetCode_Train, 
+    Problem_Solution, Python_Codes, Python_Text_to_Code, All
 )
 
 
@@ -196,8 +198,9 @@ def main():
     
     # Generate the dataset
     args = set_hyperparameters()
-    dataset_choice = All # [All, Codeforces_A, LeetCode_Complete, LeetCode_Master, LeetCode_Train, Problem_Solution]
+    dataset_choice = All
     generator, dataset = generate_dataset(base_dir, dataset_choice, args)
+    exit()
 
     # Load tokenizers
     problem_tokenizer, solution_tokenizer = load_tokenizers(generator, args)
