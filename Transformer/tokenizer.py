@@ -6,6 +6,7 @@ import re
 import pickle
 import tokenize
 
+from nltk.tokenize import word_tokenize # type: ignore
 from tensorflow.keras.preprocessing.text import Tokenizer # type: ignore
 from tensorflow.keras.preprocessing.sequence import pad_sequences # type: ignore
 
@@ -72,22 +73,40 @@ class Tokenizers:
         compiled_indices = []
         for index, solution in enumerate(solutions):
             tokens = []
+            current_line = None
             try:
                 for token in tokenize.generate_tokens(io.StringIO(solution).readline):
+                    # Skip #-based comments (multiline skipped later)
+                    if token.type == tokenize.COMMENT:
+                        current_line = token.start[0]
+                    if current_line and token.start[0] == current_line:
+                        continue # Skip
+                    else:
+                        current_line = None # No longer in a comment
+                    
+                    # Special process for spacing and tokenize strings
                     if token.type == tokenize.STRING:
-                        if token.string.startswith('"""') or token.string.startswith("'''"):
-                            continue
-                    if token.type == tokenize.INDENT:
+                        string = token.string
+                        
+                        if string.startswith('"""') or string.startswith("'''"):
+                            continue # Skip multi-line comments
+                        
+                        # Add quotes and content to tokens in order
+                        tokens.append(string[0])
+                        tokens.extend(word_tokenize(string[1:-1]))
+                        tokens.append(string[-1])
+                    elif token.type == tokenize.INDENT:
                         tokens.append(self.indent_token)
                     elif token.type == tokenize.DEDENT:
                         tokens.append(self.dedent_token)
                     else:
                         tokens.append(token.string)
-                        
+                
+                # Remove extra lines and spaces at the end
                 while tokens and tokens[-1] in ('', self.indent_token, self.dedent_token):
                     tokens.pop()
             except (tokenize.TokenError, IndentationError) as e:
-                continue
+                continue # Errors counted via compiled_indices
 
             compiled_indices.append(index)
             decoder_inputs.append([self.sos_token] + tokens)

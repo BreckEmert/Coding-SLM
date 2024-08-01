@@ -10,7 +10,7 @@ from rich.syntax import Syntax
 # Set up the console
 console = Console()
 
-def load_npz_data(file_path):
+def load_npz(file_path):
     data = np.load(file_path, allow_pickle=True)
     return data['encoder_inputs'], data['decoder_inputs'], data['targets']
 
@@ -22,12 +22,13 @@ def load_tokenizer(tokenizer_path):
 def detokenize(tokenizer, sequences):
     return tokenizer.sequences_to_texts(sequences)
 
-def display_code_snippet(code_snippet):
-    """Display code snippet with syntax highlighting"""
-    syntax = Syntax(code_snippet, "python", theme="monokai", line_numbers=True)
+def display_code(code):
+    """Display a piece of code with syntax highlighting"""
+    syntax = Syntax(code, "python", theme="monokai", line_numbers=True)
     console.print(syntax)
 
 def debug_tokenizer(tokenizer, sequences):
+    """Checks vocab, UNK token, and displays a detokenized sequence"""
     word_index = tokenizer.word_index
     print(f"Word index size: {len(word_index)}")
     if "UNK" in word_index:
@@ -36,6 +37,9 @@ def debug_tokenizer(tokenizer, sequences):
     print("Example tokens and their corresponding words:")
     for sequence in sequences[:1]:  # Just checking the first sequence for debug
         for token in sequence:
+            if token == 0:
+                continue
+
             for word, index in word_index.items():
                 # print(word, index)
                 if index == token:
@@ -53,7 +57,7 @@ def main():
     solution_tokenizer_path = os.path.join(base_dir, 'solution_tokenizer.pkl')
 
     # Load raw data
-    encoder_inputs, decoder_inputs, targets = load_npz_data(tokenized_data_path)
+    encoder_inputs, decoder_inputs, targets = load_npz(tokenized_data_path)
 
     # Load tokenizers
     problem_tokenizer = load_tokenizer(problem_tokenizer_path)
@@ -73,9 +77,9 @@ def main():
     # Visualize the data
     for i, (problem, solution) in enumerate(zip(detokenized_problems, detokenized_solutions)):
         print(f"\nExample {i+1} - Problem:\n{'-'*50}")
-        display_code_snippet(problem)
+        display_code(problem)
         print(f"\nExample {i+1} - Solution:\n{'-'*50}")
-        display_code_snippet(solution)
+        display_code(solution)
 
 if __name__ == "__main__":
     main()

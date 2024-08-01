@@ -27,7 +27,7 @@ class Dataset_Generator:
     def get_generate_function(self, dataset):
         return getattr(self, 'generate_' + dataset.name)
 
-    def process_code(self, solution, remove_comments=True):
+    def process_code(self, solution):
         """Remove trailing spaces and check for unicode issues"""
         # Normalize Unicode characters
         solution = unicodedata.normalize('NFKD', solution)
@@ -37,10 +37,6 @@ class Dataset_Generator:
 
         processed_lines = []
         for line in solution.split("\n"):
-            # Remove comments by default, multiline are removed in tokenizer
-            if remove_comments and line.startswith('#'):
-                continue
-
             processed_lines.append(line)
 
         # Filter out leading and trailing blank lines

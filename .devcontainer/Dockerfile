@@ -6,10 +6,5 @@ ENV LD_LIBRARY_PATH /usr/local/cuda-12.3/lib64:/usr/local/cuda/lib64:/usr/local/
 ENV CUDA_HOME /usr/local/cuda
 ENV TF_FORCE_GPU_ALLOW_GROWTH=true
 
-# Install required packages
-# RUN apt-get update && apt-get install -y \
-#     libcudnn8=8.9.7.29-1+cuda12.3 \
-#     libcudnn8-dev=8.9.7.29-1+cuda12.3
-
 # Install Python packages
-RUN pip install --no-cache-dir numpy pandas matplotlib
+RUN pip install --no-cache-dir matplotlib nltk numpy pandas
