@@ -1,135 +1,94 @@
-# workspace/Transformer/tokenizer.py
+# Transformer/tokenizer.py
 
-import io
 import os
-import re
 import pickle
-import tokenize
 
-from nltk.tokenize import word_tokenize # type: ignore
-from tensorflow.keras.preprocessing.text import Tokenizer # type: ignore
-from tensorflow.keras.preprocessing.sequence import pad_sequences # type: ignore
+import numpy as np
+from tensorflow.keras.preprocessing.text import Tokenizer  # type: ignore
+from tensorflow.keras.preprocessing.sequence import pad_sequences  # type: ignore
+
+from Transformer import ModelArgs
 
 
-class Tokenizers:
-    def __init__(self, base_dir):
+class TextTokenizer:
+    """Handles tokenization and padding."""
+
+    def __init__(self, base_dir: str):
         # For saving in pickles
         self.base_dir = base_dir
-        self.problem_tokenizer_path = os.path.join(base_dir, 'problem_tokenizer.pkl')
-        self.solution_tokenizer_path = os.path.join(base_dir, 'solution_tokenizer.pkl')
+        self.tokenizer_path = os.path.join(base_dir, 'tokenizer.pkl')
 
         # For saving metadata for embedding projection
         metadata_dir = os.path.join(base_dir, 'metadata')
-        self.problem_metadata_path = os.path.join(metadata_dir, 'problem_metadata.tsv')
-        self.solution_metadata_path = os.path.join(metadata_dir, 'solution_metadata.tsv')
+        self.metadata_path = os.path.join(metadata_dir, 'metadata.tsv')
         os.makedirs(metadata_dir, exist_ok=True)
 
         # Instantiate keras tokenizer
-        self.problem_tokenizer = Tokenizer(filters='', oov_token='UNK')
-        self.solution_tokenizer = Tokenizer(filters='', oov_token='UNK', lower=False)
+        self.tokenizer = Tokenizer(filters='', oov_token='UNK', lower=True)
 
         # Special tokens
         self.sos_token = '<SOS>'
         self.eos_token = '<EOS>'
         self.indent_token = '<INDENT>'
         self.dedent_token = '<DEDENT>'
-        self.hardcoded_tokens = [
-            '.', ',', '(', ')', ';', '!', '"', '-'
-        ]
 
-    def save_metadata(self, tokenizer, metadata_path):
-        with open(metadata_path, 'w') as f:
+    def save_metadata(self, tokenizer: Tokenizer, metadata_path: str) -> None:
+        """Save tokenizer metadata, especially for use in embedding projection."""
+        with open(metadata_path, 'w', encoding='utf-8') as f:
             for word, index in tokenizer.word_index.items():
                 f.write(f'{word}\n')
-    
-    def add_hardcoded_tokens(self, text):
-        # Ensure hardcoded tokens are split correctly
-        for token in self.hardcoded_tokens:
-            text = re.sub(r'(\s*{}\s*)'.format(re.escape(token)), r' \1 ', text)
-        return text
-    
-    def tokenize_input(self, problems):
+
+    def tokenize(
+            self, problems: list[str], solutions: list[str]
+    ) -> tuple[list[list[int]], list[list[int]], list[list[int]]]:
+        """Tokenize problems and solutions together."""
+
         # Fit Keras tokenizer
-        self.problem_tokenizer.fit_on_texts(problems)
+        special_tokens = [self.sos_token, self.eos_token, self.indent_token, self.dedent_token]
+        self.tokenizer.fit_on_texts(special_tokens + problems + solutions)
 
         # Save tokenizer
-        with open(self.problem_tokenizer_path, 'wb') as f:
-            pickle.dump(self.problem_tokenizer, f)
-        self.save_metadata(self.problem_tokenizer, self.problem_metadata_path)
+        with open(self.tokenizer_path, 'wb') as f:
+            pickle.dump(self.tokenizer, f)
+        self.save_metadata(self.tokenizer, self.metadata_path)
 
         # Tokenize with Keras tokenizer
-        encoder_inputs = self.problem_tokenizer.texts_to_sequences(problems)
-        
-        # Pad to same length
+        print("Length before tokenizing:", len(problems), len(solutions))
+        encoder_inputs = self.tokenizer.texts_to_sequences(
+            [self.sos_token + ' ' + text for text in problems])
+        decoder_inputs = self.tokenizer.texts_to_sequences(
+            [self.sos_token + ' ' + text for text in solutions])
+        targets = self.tokenizer.texts_to_sequences(
+            [text + ' ' + self.eos_token for text in solutions])
+
+        print("Length after tokenizing:", len(encoder_inputs), len(decoder_inputs), len(targets))
+        return encoder_inputs, decoder_inputs, targets
+
+    def pad(
+        self, encoder_inputs: list[list[int]], 
+        decoder_inputs: list[list[int]], targets: list[list[int]]
+    ) -> tuple[np.ndarray, np.ndarray, np.ndarray]:
+        """Pad tokenized sequences to the same length."""
         max_length_input = max(len(seq) for seq in encoder_inputs)
-        encoder_inputs = pad_sequences(encoder_inputs, padding='post', maxlen=max_length_input)
-        
-        return encoder_inputs
-    
-    def tokenize_output(self, solutions):
-        # Tokenize with Python tokenizer
-        decoder_inputs = []
-        targets = []
-        compiled_indices = []
-        for index, solution in enumerate(solutions):
-            tokens = []
-            current_line = None
-            try:
-                for token in tokenize.generate_tokens(io.StringIO(solution).readline):
-                    # Skip #-based comments (multiline skipped later)
-                    if token.type == tokenize.COMMENT:
-                        current_line = token.start[0]
-                    if current_line and token.start[0] == current_line:
-                        continue # Skip
-                    else:
-                        current_line = None # No longer in a comment
-                    
-                    # Special process for spacing and tokenize strings
-                    if token.type == tokenize.STRING:
-                        string = token.string
-                        
-                        if string.startswith('"""') or string.startswith("'''"):
-                            continue # Skip multi-line comments
-                        
-                        # Add quotes and content to tokens in order
-                        tokens.append(string[0])
-                        tokens.extend(word_tokenize(string[1:-1]))
-                        tokens.append(string[-1])
-                    elif token.type == tokenize.INDENT:
-                        tokens.append(self.indent_token)
-                    elif token.type == tokenize.DEDENT:
-                        tokens.append(self.dedent_token)
-                    else:
-                        tokens.append(token.string)
-                
-                # Remove extra lines and spaces at the end
-                while tokens and tokens[-1] in ('', self.indent_token, self.dedent_token):
-                    tokens.pop()
-            except (tokenize.TokenError, IndentationError) as e:
-                continue # Errors counted via compiled_indices
-
-            compiled_indices.append(index)
-            decoder_inputs.append([self.sos_token] + tokens)
-            targets.append(tokens + [self.eos_token])
-        
-        print(f"ERRORS COUNT: {len(solutions) - len(compiled_indices)}")
-        
-        # Fit Keras tokenizer and tokenize
-        special_tokens = [self.sos_token, self.eos_token, self.indent_token]
-        self.solution_tokenizer.fit_on_texts([special_tokens] + decoder_inputs + [targets[-1]])
-
-        # Save tokenizer
-        with open(self.solution_tokenizer_path, 'wb') as f:
-            pickle.dump(self.solution_tokenizer, f)
-        self.save_metadata(self.solution_tokenizer, self.solution_metadata_path)
-
-        # Tokenize with Keras tokenizer
-        decoder_inputs = self.solution_tokenizer.texts_to_sequences(decoder_inputs)
-        targets = self.solution_tokenizer.texts_to_sequences(targets)
-
-        # Pad
         max_length_output = max(len(seq) for seq in targets)
+
+        encoder_inputs = pad_sequences(encoder_inputs, padding='post', maxlen=max_length_input)
         decoder_inputs = pad_sequences(decoder_inputs, padding='post', maxlen=max_length_output)
         targets = pad_sequences(targets, padding='post', maxlen=max_length_output)
 
-        return decoder_inputs, targets, compiled_indices
+        print("Length after padding:", len(encoder_inputs), len(decoder_inputs), len(targets))
+        return encoder_inputs, decoder_inputs, targets
+
+    def load_tokenizer(
+        self, problem_tokenizer_path: str, solution_tokenizer_path: str, args: ModelArgs
+    ) -> tuple[Tokenizer, Tokenizer]:
+        """Load tokenizers and update args vocabulary sizes."""
+        with open(problem_tokenizer_path, 'rb') as f:
+            problem_tokenizer = pickle.load(f)
+            args.problem_vocab_size = len(problem_tokenizer.word_index) + 1
+
+        with open(solution_tokenizer_path, 'rb') as f:
+            solution_tokenizer = pickle.load(f)
+            args.solution_vocab_size = len(solution_tokenizer.word_index) + 1
+
+        return problem_tokenizer, solution_tokenizer

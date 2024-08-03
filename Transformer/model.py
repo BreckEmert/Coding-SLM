@@ -1,6 +1,8 @@
 # workspace/Transformer/model.py
 
 from dataclasses import dataclass
+from typing import Any, Dict, Optional, Tuple, Type
+
 import tensorflow as tf
 
 
@@ -17,12 +19,12 @@ class ModelArgs:
     
     batch_size: int = 32
     dropout_rate: float = 0.1
-    learning_rate: float = 1e-4 # Not used with Noam
+    learning_rate: float = 1e-4  # Not used with Noam
     clip_norm: float = 10.0
     
     epochs: int = 100
 
-    def get_config(self):
+    def get_config(self) -> Dict[str, Any]:
         return {
             'dim': self.dim,
             'dim_ff': self.dim_ff,
@@ -38,34 +40,34 @@ class ModelArgs:
         }
 
     @classmethod
-    def from_config(cls, config):
+    def from_config(cls: Type['ModelArgs'], config: Dict[str, Any]) -> 'ModelArgs':
         return cls(**config)
 
 
 class NoamSchedule(tf.keras.optimizers.schedules.LearningRateSchedule):
-    def __init__(self, dim, warmup_steps=4_000):
+    def __init__(self, dim: int, warmup_steps: int = 4_000):
         super(NoamSchedule, self).__init__()
         self.dim = tf.cast(dim, tf.float32)
         self.warmup_steps = warmup_steps
     
-    def __call__(self, step):
+    def __call__(self, step: tf.Tensor) -> tf.Tensor:
         step = tf.cast(step, tf.float32)
         arg1 = tf.math.rsqrt(step)
         arg2 = step * (self.warmup_steps ** -1.5)
         return tf.math.rsqrt(self.dim) * tf.math.minimum(arg1, arg2)
     
-    def get_config(self):
+    def get_config(self) -> Dict[str, Any]:
         return {
             'dim': self.dim.numpy(), 
             'warmup_steps': self.warmup_steps
         }
     
     @classmethod
-    def from_config(cls, config):
+    def from_config(cls: Type['NoamSchedule'], config: Dict[str, Any]) -> 'NoamSchedule':
         return cls(**config)
 
 
-def positional_encoder(seq_length, dim):
+def positional_encoder(seq_length: int, dim: int) -> tf.Tensor:
     # Generate positions
     positions = tf.range(seq_length, dtype=tf.float32)[..., tf.newaxis]
     
@@ -80,13 +82,12 @@ def positional_encoder(seq_length, dim):
     
     # Interlace and reshape
     pos_encoding = tf.reshape(tf.concat([sine, cosine], axis=-1), [1, seq_length, dim])
-    # print(tf.shape(pos_encoding))
 
     return pos_encoding
 
 
 class EncoderLayer(tf.keras.layers.Layer):
-    def __init__(self, args: ModelArgs, layer_index: int, name='EncoderLayer', **kwargs):
+    def __init__(self, args: ModelArgs, layer_index: int, name: str = 'EncoderLayer', **kwargs: Any):
         super(EncoderLayer, self).__init__(name=name, **kwargs)
         self.layer_index = layer_index
         self.args = args
@@ -97,11 +98,12 @@ class EncoderLayer(tf.keras.layers.Layer):
         self.num_heads = args.num_heads
         self.dim_key = args.dim_head
 
-    def build(self, input_shape):
+    def build(self, input_shape: tf.TensorShape):
         prefix = f'encoder{self.layer_index}'
 
         # Self-Attention
-        self.mha = tf.keras.layers.MultiHeadAttention(num_heads=self.num_heads, key_dim=self.dim_key, name=f'{prefix}_mha')
+        self.mha = tf.keras.layers.MultiHeadAttention(
+            num_heads=self.num_heads, key_dim=self.dim_key, name=f'{prefix}_mha')
 
         # Feed-Forward
         self.ffn = tf.keras.Sequential([
@@ -125,7 +127,7 @@ class EncoderLayer(tf.keras.layers.Layer):
         ]
         super(EncoderLayer, self).build(input_shape)
 
-    def call(self, x, training=False):
+    def call(self, x: tf.Tensor, training: bool = False) -> tf.Tensor:
         # Self-Attention
         attn_output = self.mha(x, x)
         attn_output = self.dropout_mha(attn_output, training=training) # Dropout
@@ -138,20 +140,20 @@ class EncoderLayer(tf.keras.layers.Layer):
 
         return out2
 
-    def get_config(self):
+    def get_config(self) -> Dict[str, Any]:
         config = super(EncoderLayer, self).get_config()
         config.update({'layer_index': self.layer_index, 'args': self.args})
         return config
 
     @classmethod
-    def from_config(cls, config):
+    def from_config(cls: Type['EncoderLayer'], config: Dict[str, Any]) -> 'EncoderLayer':
         layer_index = config.pop('layer_index')
         args = config.pop('args')
         return cls(layer_index=layer_index, args=args, **config)
 
 
 class DecoderLayer(tf.keras.layers.Layer):
-    def __init__(self, args: ModelArgs, layer_index: int, name='DecoderLayer', **kwargs):
+    def __init__(self, args: ModelArgs, layer_index: int, name: str = 'DecoderLayer', **kwargs: Any):
         super(DecoderLayer, self).__init__(name=name, **kwargs)
         self.layer_index = layer_index
         self.args = args
@@ -162,12 +164,14 @@ class DecoderLayer(tf.keras.layers.Layer):
         self.num_heads = args.num_heads
         self.dim_key = args.dim_head
 
-    def build(self, input_shape):
+    def build(self, input_shape: tf.TensorShape):
         prefix = f'decoder{self.layer_index}'
 
         # Self-Attention and Cross-Attention
-        self.mha1 = tf.keras.layers.MultiHeadAttention(num_heads=self.num_heads, key_dim=self.dim_key, name=f'{prefix}_mha1')
-        self.mha2 = tf.keras.layers.MultiHeadAttention(num_heads=self.num_heads, key_dim=self.dim_key, name=f'{prefix}_mha2')
+        self.mha1 = tf.keras.layers.MultiHeadAttention(
+            num_heads=self.num_heads, key_dim=self.dim_key, name=f'{prefix}_mha1')
+        self.mha2 = tf.keras.layers.MultiHeadAttention(
+            num_heads=self.num_heads, key_dim=self.dim_key, name=f'{prefix}_mha2')
         
         # Feed-Forward
         self.ffn = tf.keras.Sequential([
@@ -193,7 +197,10 @@ class DecoderLayer(tf.keras.layers.Layer):
         ]
         super(DecoderLayer, self).build(input_shape)
 
-    def call(self, x, enc_output, training=False, look_ahead_mask=None, padding_mask=None):
+    def call(
+            self, x: tf.Tensor, enc_output: tf.Tensor, training: bool = False, 
+            look_ahead_mask: Optional[tf.Tensor] = None, padding_mask: Optional[tf.Tensor] = None
+        ) -> tf.Tensor:
         # Self-Attention
         attn1_output = self.mha1(x, x, attention_mask=look_ahead_mask)
         attn1_output = self.dropout_self_attn(attn1_output, training=training) # Dropout
@@ -211,71 +218,76 @@ class DecoderLayer(tf.keras.layers.Layer):
         
         return out3
 
-    def get_config(self):
+    def get_config(self) -> Dict[str, Any]:
         config = super(DecoderLayer, self).get_config()
         config.update({'layer_index': self.layer_index, 'args': self.args})
         return config
     
     @classmethod
-    def from_config(cls, config):
+    def from_config(cls: Type['DecoderLayer'], config: Dict[str, Any]) -> 'DecoderLayer':
         layer_index = config.pop('layer_index')
         args = config.pop('args')
         return cls(layer_index=layer_index, args=args, **config)
 
 
 class EncoderBlock(tf.keras.layers.Layer):
-    def __init__(self, args: ModelArgs, name='Encoder'):
+    def __init__(self, args: ModelArgs, name: str = 'Encoder'):
         super(EncoderBlock, self).__init__(name=name)
         self.args = args
         self.num_layers = args.num_layers
 
-    def build(self, input_shape):
-        self.layers = [EncoderLayer(self.args, layer_index=i, name=f'encoder_layer_{i}') for i in range(self.num_layers)]
+    def build(self, input_shape: tf.TensorShape):
+        self.layers = [
+            EncoderLayer(self.args, layer_index=i, name=f'encoder_layer_{i}') 
+            for i in range(self.num_layers)
+        ]
         for layer in self.layers:
             layer.build(input_shape)
         super(EncoderBlock, self).build(input_shape)
 
-    def call(self, x: tf.Tensor, training=False) -> tf.Tensor:
+    def call(self, x: tf.Tensor, training: bool = False) -> tf.Tensor:
         for layer in self.layers:
             x = layer(x, training=training)
         return x
     
-    def get_config(self):
-        config = super(Transformer, self).get_config()
-        config.update({'layer_index': self.layer_index, 'args': self.args})
+    def get_config(self) -> Dict[str, Any]:
+        config = super(EncoderBlock, self).get_config()
+        config.update({'args': self.args})
         return config
 
     @classmethod
-    def from_config(cls, config):
-        layer_index = config.pop('layer_index')
+    def from_config(cls: Type['EncoderBlock'], config: Dict[str, Any]) -> 'EncoderBlock':
         args = config.pop('args')
-        return cls(layer_index=layer_index, args=args)
+        return cls(args=args, **config)
 
 
 class DecoderBlock(tf.keras.layers.Layer):
-    def __init__(self, args: ModelArgs, name='Decoder'):
+    def __init__(self, args: ModelArgs, name: str = 'Decoder'):
         super(DecoderBlock, self).__init__(name=name)
         self.args = args
         self.num_layers = args.num_layers
 
-    def build(self, input_shape):
-        self.layers = [DecoderLayer(self.args, layer_index=i, name=f'decoder_layer_{i}') for i in range(self.num_layers)]
+    def build(self, input_shape: tf.TensorShape):
+        self.layers = [
+            DecoderLayer(self.args, layer_index=i, name=f'decoder_layer_{i}') 
+            for i in range(self.num_layers)
+        ]
         for layer in self.layers:
             layer.build(input_shape)
         super(DecoderBlock, self).build(input_shape)
 
-    def call(self, x: tf.Tensor, enc_output: tf.Tensor, training=False) -> tf.Tensor:
+    def call(self, x: tf.Tensor, enc_output: tf.Tensor, training: bool = False) -> tf.Tensor:
         for layer in self.layers:
             x = layer(x, enc_output, training=training)
         return x
 
-    def get_config(self):
+    def get_config(self) -> Dict[str, Any]:
         config = super(DecoderBlock, self).get_config()
         config.update({'args': self.args})
         return config
     
     @classmethod
-    def from_config(cls, config):
+    def from_config(cls: Type['DecoderBlock'], config: Dict[str, Any]) -> 'DecoderBlock':
         args = config.pop('args')
         return cls(args=args, **config)
 
@@ -312,7 +324,7 @@ class Transformer(tf.keras.Model):
         )
 
     @tf.function
-    def train_step(self, data):
+    def train_step(self, data: Tuple[Tuple[tf.Tensor, tf.Tensor], tf.Tensor]) -> Dict[str, tf.Tensor]:
         (encoder_input, decoder_input), target = data
 
         with tf.GradientTape() as tape:
@@ -332,7 +344,7 @@ class Transformer(tf.keras.Model):
 
         return {'loss': loss}
 
-    def call(self, inputs, training=False):
+    def call(self, inputs: Tuple[tf.Tensor, tf.Tensor], training: bool = False) -> tf.Tensor:
         encoder_input, decoder_input = inputs
 
         # Embeddings
@@ -353,12 +365,12 @@ class Transformer(tf.keras.Model):
 
         return final_output
     
-    def get_config(self):
+    def get_config(self) -> Dict[str, Any]:
         config = super(Transformer, self).get_config()
         config.update({'args': self.args.get_config()})
         return config
 
     @classmethod
-    def from_config(cls, config):
+    def from_config(cls: Type['Transformer'], config: Dict[str, Any]) -> 'Transformer':
         args = ModelArgs.from_config(config.pop('args'))
         return cls(args=args)

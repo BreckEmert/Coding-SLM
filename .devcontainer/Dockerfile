@@ -7,4 +7,4 @@ ENV CUDA_HOME /usr/local/cuda
 ENV TF_FORCE_GPU_ALLOW_GROWTH=true
 
 # Install Python packages
-RUN pip install --no-cache-dir matplotlib nltk numpy pandas
+RUN pip install --no-cache-dir matplotlib nltk numpy pandas langdetect unidecode
